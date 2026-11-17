@@ -28,6 +28,48 @@ from src.models.evaluation import (
 from src.models.checkpoints import TrainingState
 
 
+MAX_WORD_CHARS = 50
+MAX_TRAINING_WORDS = 128
+
+
+def _prepare_training_sentences(sentences: List[Sentence]) -> List[Sentence]:
+    prepared = []
+    for sentence in sentences:
+        tokens = []
+        word_count = 0
+        for token in sentence.tokens:
+            if token.is_multiword() or token.is_empty():
+                tokens.append(token)
+                continue
+
+            word_count += 1
+            tokens.append(replace(
+                token,
+                form=token.form[:MAX_WORD_CHARS],
+                lemma=token.lemma[:MAX_WORD_CHARS],
+            ))
+            if word_count == MAX_TRAINING_WORDS:
+                break
+
+        prepared.append(Sentence(tokens=tokens, comments=list(sentence.comments)))
+    return prepared
+
+
+def _truncate_runtime_sentences(sentences: List[Sentence]) -> List[Sentence]:
+    return [
+        Sentence(
+            tokens=[
+                replace(token, form=token.form[:MAX_WORD_CHARS])
+                if not token.is_multiword() and not token.is_empty()
+                else token
+                for token in sentence.tokens
+            ],
+            comments=list(sentence.comments),
+        )
+        for sentence in sentences
+    ]
+
+
 class LemmatizerModel(BorgBaseModel):
     """Classifies each token into a lemma edit-script."""
 
@@ -234,6 +276,7 @@ class LemmatizerModel(BorgBaseModel):
     ) -> "LemmatizerModel":
         device = config.resolve_device()
         device_type = torch.device(device).type
+        train_sentences = _prepare_training_sentences(train_sentences)
 
         torch.manual_seed(config.seed)
 
@@ -411,7 +454,10 @@ class LemmatizerModel(BorgBaseModel):
         self.eval()
         self.to(device)
         results = list(sentences)
-        for batch in sentence_batches(self, sentences, show_progress=show_progress):
+        runtime_sentences = _truncate_runtime_sentences(sentences)
+        for batch in sentence_batches(
+            self, runtime_sentences, show_progress=show_progress,
+        ):
             if batch.input_char_ids is None:
                 raise RuntimeError("Lemmatizer inference requires input character IDs")
             upos_ids = torch.zeros_like(batch.input_ids)
@@ -445,6 +491,12 @@ class LemmatizerModel(BorgBaseModel):
                 for tok in sent.tokens:
                     if tok.is_multiword() or tok.is_empty():
                         new_sent.tokens.append(tok)
+                        continue
+                    if len(tok.form) > MAX_WORD_CHARS:
+                        new_sent.tokens.append(
+                            replace(tok, form=tok.form, lemma=tok.form)
+                        )
+                        word_id += 1
                         continue
                     new_sent.tokens.append(
                         replace(tok, lemma=word_lemmas.get(word_id, tok.lemma))

@@ -9,7 +9,10 @@ import torch
 from src.config import BorgConfig
 from src.data.conllu import Sentence, Token
 from src.models.inference import sentence_batches
-from src.models.lemmatizer import LemmatizerModel
+from src.models.lemmatizer import (
+    LemmatizerModel,
+    _prepare_training_sentences,
+)
 from src.models.parser import ParserModel, greedy_decode
 from src.models.tagger import TaggerModel
 from src.models.tokenizer import TokenizerModel
@@ -215,6 +218,53 @@ def test_lemmatizer_predicts_in_token_batches_and_preserves_alignment():
     assert actual[0].tokens[3] is inputs[0].tokens[3]
     assert model.forward.call_count == 2
     assert any(shape[1] > 4 for shape in observed_context_batches)
+
+
+def test_lemmatizer_truncates_long_runtime_forms_and_restores_originals():
+    model = make_model(LemmatizerModel, 2)
+    long_form = "x" * 63
+    inputs = [Sentence(tokens=[
+        Token(id=1, form="short", lemma="old"),
+        Token(id=2, form=long_form, lemma="old-long"),
+    ])]
+    original = deepcopy(inputs)
+
+    def forward(input_ids, attention_mask, upos_ids, input_char_ids):
+        assert input_char_ids.shape[-1] <= 52
+        sequence_width = input_ids.shape[1] - 2
+        return {"strings": ["predicted"] * (input_ids.shape[0] * sequence_width)}
+
+    model.forward = Mock(side_effect=forward)
+    actual = model.predict(inputs)
+
+    assert actual[0].tokens[0].lemma == "predicted"
+    assert actual[0].tokens[1].form == long_form
+    assert actual[0].tokens[1].lemma == long_form
+    assert model.hf_tokenizer.call_args.args[0] == [["short", long_form[:50]]]
+    assert inputs == original
+
+
+def test_lemmatizer_training_truncates_words_lemmas_and_sentence_length():
+    long_form = "f" * 60
+    long_lemma = "l" * 60
+    sentence = Sentence(
+        comments=["# training"],
+        tokens=[
+            Token(id=index, form=long_form if index == 1 else "word",
+                  lemma=long_lemma if index == 1 else "lemma")
+            for index in range(1, 131)
+        ],
+    )
+
+    prepared = _prepare_training_sentences([sentence])
+
+    assert len(prepared[0].regular_tokens()) == 128
+    assert prepared[0].tokens[0].form == long_form[:50]
+    assert prepared[0].tokens[0].lemma == long_lemma[:50]
+    assert prepared[0].comments == sentence.comments
+    assert len(sentence.regular_tokens()) == 130
+    assert sentence.tokens[0].form == long_form
+    assert sentence.tokens[0].lemma == long_lemma
 
 
 def test_lemmatizer_original_decoder_shapes():
