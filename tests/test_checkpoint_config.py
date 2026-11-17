@@ -24,7 +24,7 @@ def _make_model(config, component="parser"):
 
 
 class TestCheckpointConfig(unittest.TestCase):
-    def test_encoder_initialization_uses_configured_dtype(self):
+    def test_encoder_initialization_leaves_pretrained_weights_in_default_dtype(self):
         transformers = MagicMock()
         adapters = MagicMock()
         with patch.dict(sys.modules, {"transformers": transformers, "adapters": adapters}):
@@ -36,7 +36,7 @@ class TestCheckpointConfig(unittest.TestCase):
                         BorgBaseModel(config, component)
 
                         transformers.AutoModel.from_pretrained.assert_called_with(
-                            config.model_name, torch_dtype=dtype
+                            config.model_name
                         )
 
     def test_json_round_trip_preserves_config_and_dtype(self):
@@ -48,6 +48,14 @@ class TestCheckpointConfig(unittest.TestCase):
                 self.assertEqual(serialized["dtype"], str(dtype))
                 self.assertEqual(BorgConfig.from_dict(serialized), config)
                 self.assertIs(config.dtype, dtype)
+
+    def test_auto_device_prefers_mps_when_cuda_is_unavailable(self):
+        config = BorgConfig(device="auto")
+
+        with patch.object(torch.cuda, "is_available", return_value=False), patch.object(
+            torch.backends.mps, "is_available", return_value=True
+        ):
+            self.assertEqual(config.resolve_device(), "mps")
 
     def test_missing_dtype_uses_default_and_unknown_metadata_is_ignored(self):
         config = BorgConfig.from_dict({"lang": "de", "component": "parser"})

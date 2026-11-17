@@ -183,7 +183,10 @@ class TokenizerModel(BorgBaseModel):
                     with torch.autocast(
                         device_type=device_type,
                         dtype=config.dtype,
-                        enabled=device_type == "cuda",
+                        enabled=(
+                            device_type in ("cuda", "cpu", "mps")
+                            and config.dtype in (torch.float16, torch.bfloat16)
+                        ),
                     ):
                         boundary_logits, mwt_logits = model(
                             input_ids,
@@ -328,7 +331,10 @@ class TokenizerModel(BorgBaseModel):
                 with torch.autocast(
                     device_type=device_type,
                     dtype=self.config.dtype,
-                    enabled=device_type == "cuda",
+                    enabled=(
+                        device_type in ("cuda", "cpu", "mps")
+                        and self.config.dtype in (torch.float16, torch.bfloat16)
+                    ),
                 ):
                     model_outputs = self(
                         input_ids,
