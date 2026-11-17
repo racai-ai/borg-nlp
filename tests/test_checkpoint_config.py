@@ -57,6 +57,25 @@ class TestCheckpointConfig(unittest.TestCase):
         ):
             self.assertEqual(config.resolve_device(), "mps")
 
+    def test_bfloat16_is_used_when_runtime_device_supports_it(self):
+        config = BorgConfig(dtype=torch.bfloat16, device="cpu")
+        with patch("src.config._supports_bfloat16", return_value=True):
+            with config.autocast_context("cpu"):
+                output = torch.ones((2, 2)) @ torch.ones((2, 2))
+
+        self.assertIs(output.dtype, torch.bfloat16)
+        self.assertIs(config.dtype, torch.bfloat16)
+
+    def test_bfloat16_falls_back_with_warning_when_unsupported(self):
+        config = BorgConfig(dtype=torch.bfloat16, device="cpu")
+        with patch("src.config._supports_bfloat16", return_value=False):
+            with self.assertWarnsRegex(RuntimeWarning, "using float32"):
+                with config.autocast_context("cpu"):
+                    output = torch.ones((2, 2)) @ torch.ones((2, 2))
+
+        self.assertIs(output.dtype, torch.float32)
+        self.assertIs(config.dtype, torch.bfloat16)
+
     def test_missing_dtype_uses_default_and_unknown_metadata_is_ignored(self):
         config = BorgConfig.from_dict({"lang": "de", "component": "parser"})
 

@@ -11,7 +11,9 @@ use the default `torch.bfloat16`; invalid dtype names raise an error.
 
 `BorgConfig.dtype` controls mixed-precision computation during training and
 inference. Pretrained encoder weights are loaded in their standard dtype, then
-the configured autocast dtype is used on CPU, CUDA/ROCm, and MPS backends.
+the configured autocast dtype is used on CPU, CUDA/ROCm, and MPS backends. If
+the runtime device cannot execute bfloat16 autocast, the run warns and uses
+float32 without changing the saved `BorgConfig.dtype`.
 
 ## Inference
 

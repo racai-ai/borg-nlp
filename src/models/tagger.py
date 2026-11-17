@@ -186,14 +186,7 @@ class TaggerModel(BorgBaseModel):
 
                     optimizer.zero_grad()
 
-                    with torch.autocast(
-                        device_type=device_type,
-                        dtype=config.dtype,
-                        enabled=(
-                            device_type in ("cuda", "cpu", "mps")
-                            and config.dtype in (torch.float16, torch.bfloat16)
-                        ),
-                    ):
+                    with config.autocast_context(device):
                         u_logits, x_logits, f_logits = model(
                             input_ids,
                             attention_mask,
@@ -289,14 +282,7 @@ class TaggerModel(BorgBaseModel):
 
         results = list(sentences)
         for batch in sentence_batches(self, sentences, show_progress=show_progress):
-            with torch.inference_mode(), torch.autocast(
-                device_type=device_type,
-                dtype=self.config.dtype,
-                enabled=(
-                    device_type in ("cuda", "cpu", "mps")
-                    and self.config.dtype in (torch.float16, torch.bfloat16)
-                ),
-            ):
+            with torch.inference_mode(), self.config.autocast_context(device):
                 u_logits, x_logits, f_logits = self(
                     batch.input_ids.to(device),
                     batch.attention_mask.to(device),
