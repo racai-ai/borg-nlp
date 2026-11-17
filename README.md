@@ -9,6 +9,12 @@ stores `BorgConfig.dtype` as a string (for example, `"torch.bfloat16"`) and
 restores it to a PyTorch dtype when loading. Checkpoints without a dtype field
 use the default `torch.bfloat16`; invalid dtype names raise an error.
 
+`BorgConfig.dtype` controls mixed-precision computation during training and
+inference. Pretrained encoder weights are loaded in their standard dtype, then
+the configured autocast dtype is used on CPU, CUDA/ROCm, and MPS backends. If
+the runtime device cannot execute bfloat16 autocast, the run warns and uses
+float32 without changing the saved `BorgConfig.dtype`.
+
 ## Inference
 
 All four models use `BorgConfig.eval_batch_size` (default: 32) for prediction.
@@ -23,7 +29,7 @@ Pass `show_progress=False` to disable it, for example
 `tagger.predict(sentences, show_progress=False)` or
 `tokenizer.predict(text, show_progress=False)`. Empty input produces no bar.
 
-Prediction uses PyTorch inference mode and the configured CUDA autocast dtype.
+Prediction uses PyTorch inference mode and the configured autocast dtype.
 The parser scores dependency relations only for decoded arcs instead of
 materializing a relation tensor for every subword pair. Training is unchanged.
 Reduce `eval_batch_size` if inference exceeds available device memory; set it

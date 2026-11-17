@@ -190,7 +190,7 @@ class TestConfig(unittest.TestCase):
         from src.config import BorgConfig
         cfg = BorgConfig(device="auto")
         d = cfg.resolve_device()
-        self.assertIn(d, ("cpu", "cuda"))
+        self.assertIn(d, ("cpu", "cuda", "mps"))
 
 
 # ---------------------------------------------------------------------------

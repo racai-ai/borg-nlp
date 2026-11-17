@@ -181,11 +181,7 @@ class TokenizerModel(BorgBaseModel):
 
                     optimizer.zero_grad()
 
-                    with torch.autocast(
-                        device_type=device_type,
-                        dtype=config.dtype,
-                        enabled=device_type == "cuda",
-                    ):
+                    with config.autocast_context(device):
                         boundary_logits, mwt_logits = model(
                             input_ids,
                             attention_mask,
@@ -326,11 +322,7 @@ class TokenizerModel(BorgBaseModel):
                     batch_first=True,
                     padding_value=0,
                 ).to(device)
-                with torch.autocast(
-                    device_type=device_type,
-                    dtype=self.config.dtype,
-                    enabled=device_type == "cuda",
-                ):
+                with self.config.autocast_context(device):
                     model_outputs = self(
                         input_ids,
                         attention_mask,

@@ -514,11 +514,7 @@ class ParserModel(BorgBaseModel):
                         set_to_none=True
                     )
 
-                    with torch.autocast(
-                        device_type=device_type,
-                        dtype=config.dtype,
-                        enabled=device_type == "cuda",
-                    ):
+                    with config.autocast_context(device):
                         arc_scores, rel_scores = model(
                             input_ids,
                             attention_mask,
@@ -643,11 +639,7 @@ class ParserModel(BorgBaseModel):
 
         results = list(sentences)
         for batch in sentence_batches(self, sentences, show_progress=show_progress):
-            with torch.inference_mode(), torch.autocast(
-                device_type=device_type,
-                dtype=self.config.dtype,
-                enabled=device_type == "cuda",
-            ):
+            with torch.inference_mode(), self.config.autocast_context(device):
                 hidden = self.encode(
                     batch.input_ids.to(device),
                     batch.attention_mask.to(device),

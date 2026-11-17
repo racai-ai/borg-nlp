@@ -337,11 +337,7 @@ class LemmatizerModel(BorgBaseModel):
 
                     optimizer.zero_grad()
 
-                    with torch.autocast(
-                        device_type=device_type,
-                        dtype=config.dtype,
-                        enabled=device_type == "cuda",
-                    ):
+                    with config.autocast_context(device):
                         logits = model(
                             input_ids,
                             attention_mask,
@@ -429,11 +425,7 @@ class LemmatizerModel(BorgBaseModel):
                     dtype=torch.long,
                 )
 
-            with torch.inference_mode(), torch.autocast(
-                device_type=device_type,
-                dtype=self.config.dtype,
-                enabled=device_type == "cuda",
-            ):
+            with torch.inference_mode(), self.config.autocast_context(device):
                 lemmas = self(
                     batch.input_ids.to(device),
                     batch.attention_mask.to(device),
