@@ -4,7 +4,8 @@ Commands
 --------
 borg train --component <component> <train_file> <dev_file> <model_file>
 borg test <model_file> <input_file> <output_file>
-borg upload <model_path> <repo_id>
+borg upload <component_path> <repo_id>
+borg upload <base_repo_id> --pipeline
 """
 from __future__ import annotations
 
@@ -64,18 +65,36 @@ def _build_parser() -> argparse.ArgumentParser:
         "upload",
         help="Upload a component or complete pipeline to the Hugging Face Hub",
     )
-    upload_p.add_argument("model_path", help="Component directory or pipeline root")
-    upload_p.add_argument("repo_id", help="Hub repository, e.g. racai-ai/borg-tokenizer-mixed")
+    upload_p.add_argument(
+        "model_path",
+        nargs="?",
+        help="Component directory for raw upload; ignored with --pipeline",
+    )
+    upload_p.add_argument(
+        "repo_id",
+        nargs="?",
+        help="Hub repository ID (or the only positional argument with --pipeline)",
+    )
     upload_p.add_argument(
         "--pipeline",
         action="store_true",
         help="Upload pipeline metadata/code; adapters use <repo_id>-<component> repos",
     )
     upload_p.add_argument(
+        "--components",
+        nargs="+",
+        choices=["tokenizer", "mwt", "tagger", "parser", "lemmatizer"],
+        default=None,
+        help="Components to include in the pipeline (default: all)",
+    )
+    upload_p.add_argument(
         "--checkpoint",
         choices=["best", "last"],
         default="best",
-        help="Checkpoint folder to load from each adapter repo (default: best)",
+        help=(
+            "Use this checkpoint subfolder, or a root-level adapter if absent "
+            "(default: best)"
+        ),
     )
 
     return top
@@ -148,26 +167,33 @@ def _upload_folder(folder: Path, repo_id: str) -> None:
 
 
 def cmd_upload(args: argparse.Namespace) -> None:
+    if args.pipeline:
+        repo_id = args.repo_id or args.model_path
+        if not repo_id:
+            raise ValueError("A Hub repo ID is required for pipeline upload")
+        from src.pipeline.hf.export import export_hf_repo
+
+        with tempfile.TemporaryDirectory(prefix="borg-hf-upload-") as temp_dir:
+            export_path = Path(temp_dir) / "model"
+            export_hf_repo(
+                export_path,
+                components=args.components,
+                checkpoint=args.checkpoint,
+            )
+            _upload_folder(export_path, repo_id)
+        return
+
+    if args.model_path is None or args.repo_id is None:
+        raise ValueError("Raw component upload requires a directory and a Hub repo ID")
+    if args.components is not None:
+        raise ValueError("--components can only be used with --pipeline")
     model_path = Path(args.model_path).expanduser()
     if not model_path.is_dir():
         raise FileNotFoundError(f"Model directory not found: {model_path}")
 
-    if not args.pipeline:
-        if args.checkpoint != "best":
-            raise ValueError("--checkpoint can only be used with --pipeline")
-        _upload_folder(model_path, args.repo_id)
-        return
-
-    from src.pipeline.hf.export import export_hf_repo
-
-    with tempfile.TemporaryDirectory(prefix="borg-hf-upload-") as temp_dir:
-        export_path = Path(temp_dir) / "model"
-        export_hf_repo(
-            model_path,
-            export_path,
-            checkpoint=args.checkpoint,
-        )
-        _upload_folder(export_path, args.repo_id)
+    if args.checkpoint != "best":
+        raise ValueError("--checkpoint can only be used with --pipeline")
+    _upload_folder(model_path, args.repo_id)
 
 
 def main(argv=None) -> None:

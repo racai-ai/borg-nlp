@@ -41,18 +41,19 @@ long-sentence recovery. Annotation preserves token metadata, including
 
 ## Hugging Face pipeline
 
-Export a trained model directory to create a Hugging Face Hub-ready folder.
+Export a Hugging Face Hub pipeline bundle that references separately uploaded
+adapters.
 The packaged template at `src/pipeline/hf/config.json` is populated by the
 exporter into the Hub folder's root `config.json`, including the custom task,
-remote-code references, and component names discovered in the local model
-directory. The export includes the model-loading marker weights and runtime
-source, but not the component checkpoints:
+remote-code references, and component names. The export includes the
+model-loading marker weights and runtime source, but not component checkpoints;
+runtime configuration is read from the downloaded adapters unless explicitly
+provided:
 
 ```python
 from src.pipeline.hf import export_hf_repo
 
 export_hf_repo(
-    model_path="/path/to/models",
     output_dir="./your-nlp-repo",
     checkpoint="best",
 )
@@ -62,29 +63,38 @@ Upload each component directory to a repository named by appending its component
 name to the base repo ID. For example:
 
 ```sh
-borg upload data/models/mixed/tokenizer/ racai-ai/mixed-tokenizer
-borg upload data/models/mixed/mwt/ racai-ai/mixed-mwt
-borg upload data/models/mixed/tagger/ racai-ai/mixed-tagger
-borg upload data/models/mixed/parser/ racai-ai/mixed-parser
-borg upload data/models/mixed/lemmatizer/ racai-ai/mixed-lemmatizer
+borg upload data/models/mixed/tokenizer/ racai/borg-tokenizer-combined
+borg upload data/models/mixed/mwt/ racai/borg-mwt-combined
+borg upload data/models/mixed/tagger/ racai/borg-tagger-combined
+borg upload data/models/mixed/parser/ racai/borg-parser-combined
+borg upload data/models/mixed/lemmatizer/ racai/borg-lemmatizer-combined
 ```
 
-Then publish the base pipeline repo. This records the components from the local
-model directory but does not upload their weights:
+For a named variant, append it after the component name, for example
+`racai/borg-tokenizer-combined`.
+The uploaded component may have its `borg_config.json` at the repository root;
+no `best` or `last` subfolder is required.
+
+Then publish the base pipeline repo. This does not require local model folders
+or upload adapter weights; by default it lists all supported components:
 
 ```sh
-borg upload data/models/mixed racai-ai/mixed --pipeline
+borg upload racai/borg --pipeline
 ```
 
-Log in first with `huggingface-cli login` (or set `HF_TOKEN`). Users of the complete
-pipeline repo can load the base ID; the remote pipeline downloads each listed
-adapter from `<base-repo-id>-<component>` (for example,
-`racai-ai/mixed-tokenizer`):
+Log in first with `huggingface-cli login` (or set `HF_TOKEN`). Omit
+`adapter_variant` to load default repos such as `racai/borg-tokenizer`, or set
+it to select a variant such as `racai/borg-tokenizer-combined`:
 
 ```python
 from transformers import pipeline
 
-nlp = pipeline(model="your-username/your-nlp-repo", trust_remote_code=True)
+nlp = pipeline(model="racai/borg", trust_remote_code=True)
+combined_nlp = pipeline(
+    model="racai/borg",
+    trust_remote_code=True,
+    adapter_variant="combined",
+)
 result = nlp("Your input text here")
 ```
 

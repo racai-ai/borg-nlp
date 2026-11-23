@@ -1,0 +1,22 @@
+{
+  "model_type": "borg_cube",
+  "architectures": [
+    "BorgHFModel"
+  ],
+  "auto_map": {
+    "AutoConfig": "configuration_borg.BorgHFConfig",
+    "AutoModel": "modeling_borg.BorgHFModel"
+  },
+  "custom_pipelines": {
+    "borg-cube": {
+      "impl": "pipeline.BorgHFPipeline",
+      "pt": [
+        "AutoModel"
+      ],
+      "tf": []
+    }
+  },
+  "borg_config": {},
+  "components": [],
+  "checkpoint": "best"
+}
