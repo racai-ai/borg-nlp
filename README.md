@@ -40,7 +40,7 @@ to be an existing Hub repo. No argument selects the default adapters, while
 from borg import cube
 
 nlp = cube()
-combined_nlp = cube(model="combined")
+combined_nlp = cube(model="racai/borg")
 sentences = nlp("The cat sat on the mat.")
 ```
 
