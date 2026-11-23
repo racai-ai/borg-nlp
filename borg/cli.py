@@ -4,12 +4,16 @@ Commands
 --------
 borg train --component <component> <train_file> <dev_file> <model_file>
 borg test <model_file> <input_file> <output_file>
+borg upload <model_path> <repo_id>
 """
 from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
+from pathlib import Path
 
+from huggingface_hub import HfApi
 from src.config import BorgConfig
 from src.pipeline.pipeline import BorgPipeline
 
@@ -54,6 +58,25 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     test_p.add_argument("--device", type=str, default=None)
     test_p.add_argument("--lang", type=str, default="en")
+
+    # ---- upload ----
+    upload_p = sub.add_parser(
+        "upload",
+        help="Upload a component or complete pipeline to the Hugging Face Hub",
+    )
+    upload_p.add_argument("model_path", help="Component directory or pipeline root")
+    upload_p.add_argument("repo_id", help="Hub repository, e.g. racai-ai/borg-tokenizer-mixed")
+    upload_p.add_argument(
+        "--pipeline",
+        action="store_true",
+        help="Upload pipeline metadata/code; adapters use <repo_id>-<component> repos",
+    )
+    upload_p.add_argument(
+        "--checkpoint",
+        choices=["best", "last"],
+        default="best",
+        help="Checkpoint folder to load from each adapter repo (default: best)",
+    )
 
     return top
 
@@ -113,6 +136,40 @@ def cmd_test(args: argparse.Namespace) -> None:
     pipeline.test(args.model_file, args.input_file, args.output_file)
 
 
+def _upload_folder(folder: Path, repo_id: str) -> None:
+    api = HfApi()
+    api.create_repo(repo_id, repo_type="model", exist_ok=True)
+    api.upload_folder(
+        repo_id=repo_id,
+        repo_type="model",
+        folder_path=str(folder),
+    )
+    print(f"Uploaded to https://huggingface.co/{repo_id}")
+
+
+def cmd_upload(args: argparse.Namespace) -> None:
+    model_path = Path(args.model_path).expanduser()
+    if not model_path.is_dir():
+        raise FileNotFoundError(f"Model directory not found: {model_path}")
+
+    if not args.pipeline:
+        if args.checkpoint != "best":
+            raise ValueError("--checkpoint can only be used with --pipeline")
+        _upload_folder(model_path, args.repo_id)
+        return
+
+    from src.pipeline.hf.export import export_hf_repo
+
+    with tempfile.TemporaryDirectory(prefix="borg-hf-upload-") as temp_dir:
+        export_path = Path(temp_dir) / "model"
+        export_hf_repo(
+            model_path,
+            export_path,
+            checkpoint=args.checkpoint,
+        )
+        _upload_folder(export_path, args.repo_id)
+
+
 def main(argv=None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -121,6 +178,8 @@ def main(argv=None) -> None:
         cmd_train(args)
     elif args.command == "test":
         cmd_test(args)
+    elif args.command == "upload":
+        cmd_upload(args)
     else:
         parser.print_help()
         sys.exit(1)

@@ -38,3 +38,58 @@ to 1 for single-example inference. It must be positive.
 Sentence models still truncate at `max_seq_length`; batching does not add
 long-sentence recovery. Annotation preserves token metadata, including
 `space_after`, multiword tokens, and empty nodes.
+
+## Hugging Face pipeline
+
+Export a trained model directory to create a Hugging Face Hub-ready folder.
+The packaged template at `src/pipeline/hf/config.json` is populated by the
+exporter into the Hub folder's root `config.json`, including the custom task,
+remote-code references, and component names discovered in the local model
+directory. The export includes the model-loading marker weights and runtime
+source, but not the component checkpoints:
+
+```python
+from src.pipeline.hf import export_hf_repo
+
+export_hf_repo(
+    model_path="/path/to/models",
+    output_dir="./your-nlp-repo",
+    checkpoint="best",
+)
+```
+
+Upload each component directory to a repository named by appending its component
+name to the base repo ID. For example:
+
+```sh
+borg upload data/models/mixed/tokenizer/ racai-ai/mixed-tokenizer
+borg upload data/models/mixed/mwt/ racai-ai/mixed-mwt
+borg upload data/models/mixed/tagger/ racai-ai/mixed-tagger
+borg upload data/models/mixed/parser/ racai-ai/mixed-parser
+borg upload data/models/mixed/lemmatizer/ racai-ai/mixed-lemmatizer
+```
+
+Then publish the base pipeline repo. This records the components from the local
+model directory but does not upload their weights:
+
+```sh
+borg upload data/models/mixed racai-ai/mixed --pipeline
+```
+
+Log in first with `huggingface-cli login` (or set `HF_TOKEN`). Users of the complete
+pipeline repo can load the base ID; the remote pipeline downloads each listed
+adapter from `<base-repo-id>-<component>` (for example,
+`racai-ai/mixed-tokenizer`):
+
+```python
+from transformers import pipeline
+
+nlp = pipeline(model="your-username/your-nlp-repo", trust_remote_code=True)
+result = nlp("Your input text here")
+```
+
+Install the base repo's `requirements.txt` in the inference environment first.
+The call returns a list of sentence dictionaries, each containing comments and
+token dictionaries. A list of input strings returns one such sentence list per
+input. `trust_remote_code=True` executes the pipeline/model code stored in the
+Hub repository; review it before enabling this option.

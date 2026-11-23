@@ -79,7 +79,7 @@ class BorgPipeline:
             raise ValueError(f"Unknown component: {component}")
 
     # ------------------------------------------------------------------
-    def process(self, text: str) -> List[Sentence]:
+    def process(self, text: str, *, show_progress: bool = True) -> List[Sentence]:
         """Run text through the full pipeline.
 
         Steps applied in order depending on which components are loaded:
@@ -91,7 +91,9 @@ class BorgPipeline:
         """
         # Step 1: tokenize
         if self.tokenizer_model is not None:
-            sentences = self.tokenizer_model.predict(text)
+            sentences = self.tokenizer_model.predict(
+                text, show_progress=show_progress,
+            )
         else:
             # Naive fallback: one sentence, whitespace tokens
             from src.data.conllu import Token
@@ -101,19 +103,27 @@ class BorgPipeline:
             ]
 
         if self.mwt_model is not None:
-            sentences = self.mwt_model.predict(sentences)
+            sentences = self.mwt_model.predict(
+                sentences, show_progress=show_progress,
+            )
 
         # Step 2: tag
         if self.tagger_model is not None:
-            sentences = self.tagger_model.predict(sentences)
+            sentences = self.tagger_model.predict(
+                sentences, show_progress=show_progress,
+            )
 
         # Step 3: parse
         if self.parser_model is not None:
-            sentences = self.parser_model.predict(sentences)
+            sentences = self.parser_model.predict(
+                sentences, show_progress=show_progress,
+            )
 
         # Step 4: lemmatize
         if self.lemmatizer_model is not None:
-            sentences = self.lemmatizer_model.predict(sentences)
+            sentences = self.lemmatizer_model.predict(
+                sentences, show_progress=show_progress,
+            )
 
         return sentences
 
