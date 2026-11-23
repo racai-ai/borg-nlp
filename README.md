@@ -32,19 +32,22 @@ The model directory contains one folder per component. Without `model_path`,
 ### Download adapters directly with `borg.cube`
 
 The standard `borg.cube` API can download your component repos directly. The
-base ID here is only a naming prefix; it does not need to be an existing Hub
-repo:
+default base ID is `racai/borg`; it is only a naming prefix and does not need
+to be an existing Hub repo. No argument selects the default adapters, while
+`"combined"` selects the combined variant:
 
 ```python
 from borg import cube
 
-nlp = cube("racai/borg", adapter_variant="combined")
+nlp = cube()
+combined_nlp = cube(model="combined")
 sentences = nlp("The cat sat on the mat.")
 ```
 
-Omit `adapter_variant` for default repo names such as `racai/borg-tokenizer`.
-The Hugging Face Hub caches downloaded adapters locally. This API does not
-require a separate pipeline repo or `trust_remote_code`.
+For a different base ID, pass it explicitly, for example
+`cube("owner/project", adapter_variant="combined")`. The Hugging Face Hub caches
+downloaded adapters locally. This API does not require a separate pipeline repo
+or `trust_remote_code`.
 
 ### Hugging Face models
 

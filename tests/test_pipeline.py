@@ -540,9 +540,8 @@ class TestCubeAPI(unittest.TestCase):
             ):
                 with patch("borg.BorgPipeline.load_component") as load_component:
                     api = cube(
-                        "racai/borg",
+                        model="combined",
                         components=["tokenizer", "parser"],
-                        adapter_variant="combined",
                     )
 
         self.assertEqual(
@@ -564,6 +563,31 @@ class TestCubeAPI(unittest.TestCase):
         self.assertEqual(api.config.lang, "ro")
         self.assertEqual(api.config.device, "auto")
         self.assertIsNone(api.model_path)
+
+    def test_cube_factory_defaults_to_base_hub_adapters(self):
+        import json
+
+        from borg import cube
+
+        repo_ids = []
+        with tempfile.TemporaryDirectory() as cache:
+            cache_path = Path(cache)
+
+            def download(repo_id):
+                repo_ids.append(repo_id)
+                repo_path = cache_path / repo_id.rsplit("/", 1)[-1]
+                repo_path.mkdir()
+                (repo_path / "borg_config.json").write_text(
+                    json.dumps({"component": "tokenizer"}),
+                    encoding="utf-8",
+                )
+                return str(repo_path)
+
+            with patch("src.models.hub.snapshot_download", side_effect=download):
+                with patch("borg.BorgPipeline.load_component"):
+                    cube(components=["tokenizer"])
+
+        self.assertEqual(repo_ids, ["racai/borg-tokenizer"])
 
 
 class TestPipelineTrainingPaths(unittest.TestCase):

@@ -17,6 +17,8 @@ from src.config import BorgConfig
 from src.data.conllu import Sentence
 from src.pipeline.pipeline import BorgPipeline
 
+DEFAULT_HUB_BASE_ID = "racai/borg"
+
 
 class Cube:
     """High-level interface to the borg-cube NLP pipeline.
@@ -82,7 +84,7 @@ class Cube:
 
 
 def cube(
-    model: str,
+    model: Optional[str] = None,
     components: Optional[List[str]] = None,
     config: Optional[BorgConfig] = None,
     *,
@@ -91,60 +93,73 @@ def cube(
 ) -> Cube:
     """Load a local model or download component adapters from the Hub.
 
+    ``cube()`` downloads default adapters using ``racai/borg`` as their name
+    prefix. ``cube("combined")`` downloads the ``-combined`` variant.
     ``cube("en")`` loads local components from ``~/.borg_cube/en/``.
     ``cube("file:///path/to/models")`` loads from a local folder.
-    A Hub base ID such as ``"racai/borg"`` downloads component repos named
-    ``racai/borg-<component>``; ``adapter_variant="combined"`` appends
-    ``-combined`` to each component repo name. No base pipeline repo is needed.
+    An explicit Hub base ID such as ``"owner/project"`` downloads component
+    repos named ``owner/project-<component>``. No base pipeline repo is needed.
     """
-    if model.startswith("file://"):
+    if model is not None and model.startswith("file://"):
         model_path = unquote(model[len("file://"):])
         if not model_path:
             raise ValueError("A file:// model URI must include a folder path")
         lang = os.path.basename(os.path.normpath(model_path)) or "en"
         return Cube(lang=lang, model_path=model_path, components=components, config=config)
 
-    if model.count("/") == 1 and not model.startswith((".", "/")):
-        selected_components = (
-            Cube.DEFAULT_COMPONENTS if components is None else components
-        )
-        if not selected_components:
-            return Cube(
-                lang=config.lang if config is not None else "en",
-                components=[],
-                config=config,
-                _component_paths={},
+    if model == "combined":
+        if adapter_variant is not None:
+            raise ValueError(
+                "Do not pass adapter_variant when model is the 'combined' shorthand"
             )
-        unknown = set(selected_components) - set(Cube.DEFAULT_COMPONENTS)
-        if unknown:
-            raise ValueError(f"Unknown components: {', '.join(sorted(unknown))}")
+        base_repo_id = DEFAULT_HUB_BASE_ID
+        adapter_variant = "combined"
+    elif model is None or model == "":
+        base_repo_id = DEFAULT_HUB_BASE_ID
+    elif model.count("/") == 1 and not model.startswith((".", "/")):
+        base_repo_id = model
+    else:
+        return Cube(lang=model, components=components, config=config)
 
-        from src.models.hub import download_component_checkpoints
-
-        component_paths = download_component_checkpoints(
-            model,
-            selected_components,
-            variant=adapter_variant,
-            checkpoint=checkpoint,
-        )
-        if config is None:
-            import json
-
-            first_checkpoint = next(iter(component_paths.values()))
-            with (first_checkpoint / "borg_config.json").open(
-                encoding="utf-8"
-            ) as source:
-                config = BorgConfig.from_dict(json.load(source))
-            config.device = "auto"
-
+    selected_components = (
+        Cube.DEFAULT_COMPONENTS if components is None else components
+    )
+    if not selected_components:
         return Cube(
-            lang=config.lang,
-            components=selected_components,
+            lang=config.lang if config is not None else "en",
+            components=[],
             config=config,
-            _component_paths={
-                component: str(path)
-                for component, path in component_paths.items()
-            },
+            _component_paths={},
         )
 
-    return Cube(lang=model, components=components, config=config)
+    unknown = set(selected_components) - set(Cube.DEFAULT_COMPONENTS)
+    if unknown:
+        raise ValueError(f"Unknown components: {', '.join(sorted(unknown))}")
+
+    from src.models.hub import download_component_checkpoints
+
+    component_paths = download_component_checkpoints(
+        base_repo_id,
+        selected_components,
+        variant=adapter_variant,
+        checkpoint=checkpoint,
+    )
+    if config is None:
+        import json
+
+        first_checkpoint = next(iter(component_paths.values()))
+        with (first_checkpoint / "borg_config.json").open(
+            encoding="utf-8"
+        ) as source:
+            config = BorgConfig.from_dict(json.load(source))
+        config.device = "auto"
+
+    return Cube(
+        lang=config.lang,
+        components=selected_components,
+        config=config,
+        _component_paths={
+            component: str(path)
+            for component, path in component_paths.items()
+        },
+    )
