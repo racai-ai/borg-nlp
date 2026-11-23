@@ -185,7 +185,8 @@ class LemmatizerModel(BorgBaseModel):
         input_char_emb = self.input_embedding(input_char_ids)
         concat=concat.unsqueeze(1).repeat(1, input_char_emb.shape[1], 1)
         input_embedding= torch.cat([concat, input_char_emb], dim=-1)
-        encoder_states, _=self.input_encoder(input_embedding)
+        with torch.autocast(device_type=input_embedding.device.type, enabled=False):
+            encoder_states, _=self.input_encoder(input_embedding.float())
         
         output_strings=["" for _ in range(input_char_ids.shape[0])]
         finished = [False for _ in output_strings]
@@ -198,7 +199,14 @@ class LemmatizerModel(BorgBaseModel):
             max_output_length=output_char_ids.shape[1]
             
         for step in range(max_output_length):
-            decoder_output, decoder_hidden=self.output_decoder(last_output_embeddings, decoder_hidden)
+            with torch.autocast(
+                device_type=last_output_embeddings.device.type,
+                enabled=False,
+            ):
+                decoder_output, decoder_hidden=self.output_decoder(
+                    last_output_embeddings.float(),
+                    decoder_hidden,
+                )
             logits=self.output_logit(decoder_output)
             output_logits.append(logits)
             last_output_char_ids=logits.argmax(-1)

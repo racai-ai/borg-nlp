@@ -1,7 +1,7 @@
 """Offline prediction regressions and measurable batching checks."""
 from copy import deepcopy
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
@@ -286,6 +286,32 @@ def test_lemmatizer_original_decoder_shapes():
 
     assert torch.count_nonzero(decoder_inputs[0]) == 0
     assert result["logits"].shape == (4, 3, len(model.output_vocab))
+
+
+def test_lemmatizer_lstm_runs_outside_bfloat16_autocast():
+    model = make_model(LemmatizerModel, 1)
+    autocast_states = []
+    hooks = [
+        lstm.register_forward_pre_hook(
+            lambda _, __: autocast_states.append(torch.is_autocast_enabled("cpu"))
+        )
+        for lstm in (model.input_encoder, model.output_decoder)
+    ]
+
+    with patch("src.config._supports_bfloat16", return_value=True):
+        with model.config.autocast_context("cpu"):
+            model(
+                torch.tensor([[1, 2, 3, 4]]),
+                torch.ones((1, 4), dtype=torch.long),
+                torch.tensor([[0, 2, 2, 0]]),
+                torch.tensor([[[2, 4, 3], [2, 3, 0]]]),
+                max_output_length=1,
+            )
+
+    for hook in hooks:
+        hook.remove()
+
+    assert autocast_states == [False, False]
 
 
 @pytest.mark.parametrize("model_type", [TaggerModel, LemmatizerModel, ParserModel])
