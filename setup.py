@@ -4,7 +4,7 @@ with open("requirements.txt") as f:
     install_requires = [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
 setup(
-    name="borg-cube",
+    name="borg-nlp",
     version="0.1.0",
     description="A complete NLP processing pipeline using DeBERTa-v3 and adapters",
     packages=find_packages(include=["borg", "src", "src.*", "eval"]),

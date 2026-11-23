@@ -12,7 +12,7 @@ Hugging Face pipeline.
 Install the package and its runtime dependencies:
 
 ```sh
-python -m pip install borg-cube
+python -m pip install borg-nlp
 ```
 
 ### Local models
@@ -29,10 +29,28 @@ sentences = nlp("The cat sat on the mat.")
 The model directory contains one folder per component. Without `model_path`,
 `cube("en")` looks under `~/.borg_cube/en/`.
 
+### Download adapters directly with `borg.cube`
+
+The standard `borg.cube` API can download your component repos directly. The
+base ID here is only a naming prefix; it does not need to be an existing Hub
+repo:
+
+```python
+from borg import cube
+
+nlp = cube("racai/borg", adapter_variant="combined")
+sentences = nlp("The cat sat on the mat.")
+```
+
+Omit `adapter_variant` for default repo names such as `racai/borg-tokenizer`.
+The Hugging Face Hub caches downloaded adapters locally. This API does not
+require a separate pipeline repo or `trust_remote_code`.
+
 ### Hugging Face models
 
-The base pipeline repo lists its components. By default, the pipeline loads
-unsuffixed adapter repos such as `racai/borg-tokenizer`:
+If you prefer the Transformers `pipeline()` API, publish a base pipeline repo
+as described below. By default it loads unsuffixed adapter repos such as
+`racai/borg-tokenizer`:
 
 ```python
 from transformers import pipeline
@@ -54,7 +72,7 @@ nlp = pipeline(
 result = nlp("The cat sat on the mat.")
 ```
 
-Install `borg-cube` in the inference environment before loading the pipeline.
+Install `borg-nlp` in the inference environment before loading the pipeline.
 `trust_remote_code=True` runs code from the Hub repository; review it before
 enabling this option. Runtime device selection uses the local hardware by
 default; pass `device=-1` to force CPU.
@@ -114,7 +132,8 @@ borg upload data/models/mixed/parser/ racai/borg-parser-combined
 borg upload data/models/mixed/lemmatizer/ racai/borg-lemmatizer-combined
 ```
 
-Then publish the base pipeline repo:
+These component repos are sufficient for `borg.cube`; a separate base pipeline
+repo is needed only for Transformers `pipeline()`:
 
 ```sh
 borg upload racai/borg --pipeline

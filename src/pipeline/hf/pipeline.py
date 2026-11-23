@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from huggingface_hub import snapshot_download
 from transformers.pipelines import Pipeline
 
+from src.models.hub import download_component_checkpoints
 
 _COMPONENTS = ("tokenizer", "mwt", "tagger", "parser", "lemmatizer")
 
@@ -125,20 +126,6 @@ def _runtime_device(config, device) -> Any:
     return torch.device(config.resolve_device())
 
 
-def _adapter_repo_id(base_repo_id: str, component: str, variant: Optional[str]) -> str:
-    if variant is None:
-        return f"{base_repo_id}-{component}"
-    if (
-        not isinstance(variant, str)
-        or not variant
-        or variant.strip() != variant
-        or "/" in variant
-        or "\\" in variant
-    ):
-        raise ValueError("adapter_variant must be a non-empty repository name suffix")
-    return f"{base_repo_id}-{component}-{variant}"
-
-
 def _load_engine(model, device, adapter_variant: Optional[str] = None):
     repo_path = _repository_path(model)
     repo_string = str(repo_path)
@@ -148,23 +135,12 @@ def _load_engine(model, device, adapter_variant: Optional[str] = None):
     from src.config import BorgConfig
     from src.pipeline.pipeline import BorgPipeline
 
-    adapter_checkpoints = []
-    for component in model.config.components:
-        adapter_repo_id = _adapter_repo_id(
-            model.config._name_or_path,
-            component,
-            adapter_variant,
-        )
-        adapter_repo_path = Path(snapshot_download(adapter_repo_id))
-        checkpoint_path = adapter_repo_path / model.config.checkpoint
-        if not (checkpoint_path / "borg_config.json").is_file():
-            if not (adapter_repo_path / "borg_config.json").is_file():
-                raise FileNotFoundError(
-                    f"Repository {adapter_repo_id!r} has no "
-                    f"{model.config.checkpoint!r} checkpoint for {component!r}"
-                )
-            checkpoint_path = adapter_repo_path
-        adapter_checkpoints.append((component, checkpoint_path))
+    adapter_checkpoints = download_component_checkpoints(
+        model.config._name_or_path,
+        model.config.components,
+        variant=adapter_variant,
+        checkpoint=model.config.checkpoint,
+    )
 
     if not adapter_checkpoints:
         raise ValueError("The Borg pipeline config does not list any adapters")
@@ -172,10 +148,10 @@ def _load_engine(model, device, adapter_variant: Optional[str] = None):
     if model.config.borg_config:
         config = BorgConfig.from_dict(model.config.borg_config)
     else:
-        config = _load_config(adapter_checkpoints[0][1])
+        config = _load_config(next(iter(adapter_checkpoints.values())))
     runtime_device = _runtime_device(config, device)
     engine = BorgPipeline(config)
-    for component, checkpoint_path in adapter_checkpoints:
+    for component, checkpoint_path in adapter_checkpoints.items():
         engine.load_component(component, str(checkpoint_path))
 
     return engine, runtime_device

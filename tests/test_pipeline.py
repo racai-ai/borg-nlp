@@ -12,7 +12,8 @@ import tempfile
 import textwrap
 import types
 import unittest
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import MagicMock, call, patch
 
 # Ensure the repo root is on the path
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -506,6 +507,63 @@ class TestCubeAPI(unittest.TestCase):
 
         load_component.assert_not_called()
         self.assertEqual(api.model_path, model_path)
+
+    def test_cube_factory_downloads_hub_adapters_without_base_repo(self):
+        import json
+
+        from borg import cube
+
+        repo_ids = []
+        with tempfile.TemporaryDirectory() as cache:
+            cache_path = Path(cache)
+
+            def download(repo_id):
+                repo_ids.append(repo_id)
+                component = repo_id.rsplit("-", 2)[-2]
+                repo_path = cache_path / repo_id.rsplit("/", 1)[-1]
+                repo_path.mkdir()
+                (repo_path / "borg_config.json").write_text(
+                    json.dumps(
+                        {
+                            "component": component,
+                            "lang": "ro",
+                            "device": "cuda",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return str(repo_path)
+
+            with patch(
+                "src.models.hub.snapshot_download",
+                side_effect=download,
+            ):
+                with patch("borg.BorgPipeline.load_component") as load_component:
+                    api = cube(
+                        "racai/borg",
+                        components=["tokenizer", "parser"],
+                        adapter_variant="combined",
+                    )
+
+        self.assertEqual(
+            repo_ids,
+            [
+                "racai/borg-tokenizer-combined",
+                "racai/borg-parser-combined",
+            ],
+        )
+        load_component.assert_has_calls(
+            [
+                call(
+                    "tokenizer",
+                    str(cache_path / "borg-tokenizer-combined"),
+                ),
+                call("parser", str(cache_path / "borg-parser-combined")),
+            ]
+        )
+        self.assertEqual(api.config.lang, "ro")
+        self.assertEqual(api.config.device, "auto")
+        self.assertIsNone(api.model_path)
 
 
 class TestPipelineTrainingPaths(unittest.TestCase):

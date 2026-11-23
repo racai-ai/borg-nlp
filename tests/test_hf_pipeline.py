@@ -12,8 +12,8 @@ from src.data.conllu import Sentence, Token
 from src.pipeline.hf.configuration_borg import BorgHFConfig
 from src.pipeline.hf.export import export_hf_repo
 from src.pipeline.hf.modeling_borg import BorgHFModel
+from src.models.hub import adapter_repo_id
 from src.pipeline.hf.pipeline import (
-    _adapter_repo_id,
     _discover_checkpoints,
     _load_engine,
     _runtime_device,
@@ -160,18 +160,22 @@ class TestHuggingFacePipeline(unittest.TestCase):
                 side_effect=download,
             ) as download_mock:
                 with patch(
-                    "src.pipeline.hf.pipeline._runtime_device",
-                    return_value="cpu",
-                ):
+                    "src.models.hub.snapshot_download",
+                    side_effect=download,
+                ) as adapter_download_mock:
                     with patch(
-                        "src.pipeline.pipeline.BorgPipeline"
-                    ) as pipeline_class:
-                        _load_engine(model, None, adapter_variant="combined")
+                        "src.pipeline.hf.pipeline._runtime_device",
+                        return_value="cpu",
+                    ):
+                        with patch(
+                            "src.pipeline.pipeline.BorgPipeline"
+                        ) as pipeline_class:
+                            _load_engine(model, None, adapter_variant="combined")
 
+        download_mock.assert_called_once_with("racai-ai/mixed", revision=None)
         self.assertEqual(
-            download_mock.call_args_list,
+            adapter_download_mock.call_args_list,
             [
-                call("racai-ai/mixed", revision=None),
                 call("racai-ai/mixed-tokenizer-combined"),
                 call("racai-ai/mixed-parser-combined"),
             ],
@@ -190,15 +194,15 @@ class TestHuggingFacePipeline(unittest.TestCase):
 
     def test_adapter_repo_id_omits_suffix_for_default_variant(self):
         self.assertEqual(
-            _adapter_repo_id("racai/borg", "tokenizer", None),
+            adapter_repo_id("racai/borg", "tokenizer"),
             "racai/borg-tokenizer",
         )
         self.assertEqual(
-            _adapter_repo_id("racai/borg", "tokenizer", "combined"),
+            adapter_repo_id("racai/borg", "tokenizer", "combined"),
             "racai/borg-tokenizer-combined",
         )
         with self.assertRaises(ValueError):
-            _adapter_repo_id("racai/borg", "tokenizer", "bad/name")
+            adapter_repo_id("racai/borg", "tokenizer", "bad/name")
 
 
 if __name__ == "__main__":
