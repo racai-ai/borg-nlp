@@ -15,7 +15,10 @@ class BorgHFModel(PreTrainedModel):
 
     def __init__(self, config: BorgHFConfig):
         super().__init__(config)
-        self.register_buffer("_pipeline_marker", torch.zeros(1))
+        self.register_parameter(
+            "_pipeline_marker",
+            torch.nn.Parameter(torch.zeros(1), requires_grad=False),
+        )
         self.post_init()
 
     def forward(self, *args: Any, **kwargs: Any):

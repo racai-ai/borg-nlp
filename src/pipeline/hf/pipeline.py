@@ -115,11 +115,13 @@ def _repository_path(model) -> Path:
 def _runtime_device(config, device) -> Any:
     import torch
 
-    if device is not None:
-        if isinstance(device, int):
-            config.device = "cpu" if device < 0 else f"cuda:{device}"
-        else:
-            config.device = str(device)
+    if device is None:
+        # Checkpoints can record the training device; default to local hardware at inference.
+        config.device = "auto"
+    elif isinstance(device, int):
+        config.device = "cpu" if device < 0 else f"cuda:{device}"
+    else:
+        config.device = str(device)
     return torch.device(config.resolve_device())
 
 

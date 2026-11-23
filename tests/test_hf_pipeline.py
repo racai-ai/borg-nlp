@@ -5,18 +5,38 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import call, patch
 
+import torch
+
 from src.config import BorgConfig
 from src.data.conllu import Sentence, Token
+from src.pipeline.hf.configuration_borg import BorgHFConfig
 from src.pipeline.hf.export import export_hf_repo
+from src.pipeline.hf.modeling_borg import BorgHFModel
 from src.pipeline.hf.pipeline import (
     _adapter_repo_id,
     _discover_checkpoints,
     _load_engine,
+    _runtime_device,
     _sentence_to_dict,
 )
 
 
 class TestHuggingFacePipeline(unittest.TestCase):
+    def test_marker_model_exposes_a_device_to_transformers(self):
+        model = BorgHFModel(BorgHFConfig())
+
+        self.assertIn("_pipeline_marker", dict(model.named_parameters()))
+        self.assertEqual(model.device.type, "cpu")
+
+    def test_runtime_device_defaults_to_local_hardware(self):
+        config = BorgConfig(device="cuda")
+        with patch("torch.cuda.is_available", return_value=False):
+            with patch("torch.backends.mps.is_available", return_value=False):
+                device = _runtime_device(config, None)
+
+        self.assertEqual(device.type, "cpu")
+        self.assertEqual(config.device, "auto")
+
     def test_sentence_output_is_json_serializable_and_preserves_annotations(self):
         sentence = Sentence(
             comments=["# sent_id = 1"],
