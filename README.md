@@ -5,7 +5,19 @@
 `borg_nlp` is a Python NLP pipeline for tokenization, multiword-token
 expansion, part-of-speech tagging, dependency parsing, and lemmatization.
 Components can be used from a local model directory or loaded as a
-Hugging Face pipeline.
+Hugging Face pipeline. 
+
+We provide a single model trained on all 300+ [Universal Dependencies Treebanks](https://universaldependencies.org/). Detailed treebank results are [here](RESULTS.md)
+
+Features:
+- Automatic code switching and language detection
+- Tokenization and sentence splitting
+- Morphological analysis (tagging, lemmatization etc.)
+- Parsing
+- Python Library
+- CLI integration
+- Easy PIP installation
+- Huggingface pipeline
 
 ## 2. Quick start guide
 
