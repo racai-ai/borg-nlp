@@ -461,10 +461,15 @@ class LemmatizerModel(BorgBaseModel):
 
         self.eval()
         self.to(device)
-        results = list(sentences)
         runtime_sentences = _truncate_runtime_sentences(sentences)
+        word_lemmas_by_sentence: List[Dict[int, str]] = [
+            {} for _ in sentences
+        ]
         for batch in sentence_batches(
-            self, runtime_sentences, show_progress=show_progress,
+            self,
+            runtime_sentences,
+            show_progress=show_progress,
+            window_long_sentences=True,
         ):
             if batch.input_char_ids is None:
                 raise RuntimeError("Lemmatizer inference requires input character IDs")
@@ -488,28 +493,37 @@ class LemmatizerModel(BorgBaseModel):
                 )["strings"]
 
             for row, index in enumerate(batch.indices):
-                sent = sentences[index]
                 sequence_width = batch.input_ids.shape[1] - 2
-                word_lemmas = {
-                    word_id: lemmas[row * sequence_width + position - 1]
-                    for word_id, position in batch.word_positions[row].items()
-                }
-                new_sent = Sentence(comments=sent.comments)
-                word_id = 0
-                for tok in sent.tokens:
-                    if tok.is_multiword() or tok.is_empty():
-                        new_sent.tokens.append(tok)
+                for word_id, position in batch.word_positions[row].items():
+                    if word_id not in batch.core_word_ids[row]:
                         continue
-                    if len(tok.form) > MAX_WORD_CHARS:
-                        new_sent.tokens.append(
-                            replace(tok, form=tok.form, lemma=tok.form)
-                        )
-                        word_id += 1
-                        continue
-                    new_sent.tokens.append(
-                        replace(tok, lemma=word_lemmas.get(word_id, tok.lemma))
+                    word_lemmas_by_sentence[index][word_id] = (
+                        lemmas[row * sequence_width + position - 1]
                     )
+
+        results = list(sentences)
+        for index, sent in enumerate(sentences):
+            if not word_lemmas_by_sentence[index]:
+                continue
+            new_sent = Sentence(comments=sent.comments)
+            word_id = 0
+            for tok in sent.tokens:
+                if tok.is_multiword() or tok.is_empty():
+                    new_sent.tokens.append(tok)
+                    continue
+                if len(tok.form) > MAX_WORD_CHARS:
+                    new_sent.tokens.append(replace(tok, lemma=tok.form))
                     word_id += 1
-                results[index] = new_sent
+                    continue
+                if word_id not in word_lemmas_by_sentence[index]:
+                    raise RuntimeError(
+                        f"Lemmatizer inference omitted word {tok.id} "
+                        f"in sentence {index}"
+                    )
+                new_sent.tokens.append(
+                    replace(tok, lemma=word_lemmas_by_sentence[index][word_id])
+                )
+                word_id += 1
+            results[index] = new_sent
 
         return results

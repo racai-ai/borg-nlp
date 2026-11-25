@@ -280,8 +280,15 @@ class TaggerModel(BorgBaseModel):
             v: k for k, v in self.feats_vocab.items()
         }
 
-        results = list(sentences)
-        for batch in sentence_batches(self, sentences, show_progress=show_progress):
+        word_tags_by_sentence: List[Dict[int, tuple[str, str, str]]] = [
+            {} for _ in sentences
+        ]
+        for batch in sentence_batches(
+            self,
+            sentences,
+            show_progress=show_progress,
+            window_long_sentences=True,
+        ):
             with torch.inference_mode(), self.config.autocast_context(device):
                 u_logits, x_logits, f_logits = self(
                     batch.input_ids.to(device),
@@ -293,22 +300,31 @@ class TaggerModel(BorgBaseModel):
                 ).cpu().tolist()
 
             for row, index in enumerate(batch.indices):
-                sent = sentences[index]
-                word_tags = {
-                    wid: (
+                for wid, pos in batch.word_positions[row].items():
+                    if wid not in batch.core_word_ids[row]:
+                        continue
+                    word_tags_by_sentence[index][wid] = (
                         inv_upos.get(predictions[row][pos][0], "_"),
                         inv_xpos.get(predictions[row][pos][1], "_"),
                         inv_feats.get(predictions[row][pos][2], "_"),
                     )
-                    for wid, pos in batch.word_positions[row].items()
-                }
-                new_sent = Sentence(comments=sent.comments)
-                for tok in sent.tokens:
-                    if tok.is_multiword() or tok.is_empty():
-                        new_sent.tokens.append(tok)
-                        continue
-                    upos, xpos, feats = word_tags.get(tok.id - 1, ("_", "_", "_"))
-                    new_sent.tokens.append(replace(tok, upos=upos, xpos=xpos, feats=feats))
-                results[index] = new_sent
+
+        results = list(sentences)
+        for index, sent in enumerate(sentences):
+            if not word_tags_by_sentence[index]:
+                continue
+            new_sent = Sentence(comments=sent.comments)
+            for tok in sent.tokens:
+                if tok.is_multiword() or tok.is_empty():
+                    new_sent.tokens.append(tok)
+                    continue
+                word_id = tok.id - 1
+                if word_id not in word_tags_by_sentence[index]:
+                    raise RuntimeError(
+                        f"Tagger inference omitted word {tok.id} in sentence {index}"
+                    )
+                upos, xpos, feats = word_tags_by_sentence[index][word_id]
+                new_sent.tokens.append(replace(tok, upos=upos, xpos=xpos, feats=feats))
+            results[index] = new_sent
 
         return results

@@ -637,56 +637,176 @@ class ParserModel(BorgBaseModel):
             for k, v in self.deprel_vocab.items()
         }
 
+        words_by_sentence = [
+            sentence.regular_tokens()
+            for sentence in sentences
+        ]
+        word_states: List[List[Optional[torch.Tensor]]] = [
+            [None] * len(words)
+            for words in words_by_sentence
+        ]
+        root_states: List[List[torch.Tensor]] = [
+            []
+            for _ in sentences
+        ]
         results = list(sentences)
-        for batch in sentence_batches(self, sentences, show_progress=show_progress):
+        for batch in sentence_batches(
+            self,
+            sentences,
+            show_progress=show_progress,
+            window_long_sentences=True,
+        ):
             with torch.inference_mode(), self.config.autocast_context(device):
                 hidden = self.encode(
                     batch.input_ids.to(device),
                     batch.attention_mask.to(device),
                 )
-                arc_scores = self.arc_biaffine(
-                    self.arc_dep_mlp(hidden),
-                    self.arc_head_mlp(hidden),
-                )
-                rel_dep = self.rel_dep_mlp(hidden)
-                rel_head = self.rel_head_mlp(hidden)
-
                 for row, index in enumerate(batch.indices):
-                    word_positions = batch.word_positions[row]
-                    inv_positions = {pos: wid for wid, pos in word_positions.items()}
-                    head_positions = greedy_decode(arc_scores[row], word_positions)
-                    word_heads = {
-                        wid: 0 if head == 0 else inv_positions[head] + 1
-                        for wid, head in head_positions.items()
-                    }
-                    word_deprels: Dict[int, str] = {}
-                    if word_positions:
+                    if not batch.core_word_ids[row]:
+                        continue
+                    if not batch.windowed_rows[row]:
+                        continue
+                    root_states[index].append(hidden[row, 0].detach().cpu())
+                    for word_id in batch.core_word_ids[row]:
+                        position = batch.word_positions[row][word_id]
+                        if word_states[index][word_id] is not None:
+                            raise RuntimeError(
+                                f"Parser assigned word {word_id + 1} more than once "
+                                f"in sentence {index}"
+                            )
+                        word_states[index][word_id] = (
+                            hidden[row, position].detach().cpu()
+                        )
+
+                short_rows = [
+                    row
+                    for row, core_ids in enumerate(batch.core_word_ids)
+                    if core_ids and not batch.windowed_rows[row]
+                ]
+                if short_rows:
+                    arc_scores = self.arc_biaffine(
+                        self.arc_dep_mlp(hidden),
+                        self.arc_head_mlp(hidden),
+                    )
+                    rel_dep = self.rel_dep_mlp(hidden)
+                    rel_head = self.rel_head_mlp(hidden)
+                    for row in short_rows:
+                        index = batch.indices[row]
+                        sent = sentences[index]
+                        word_positions = batch.word_positions[row]
+                        inverse_positions = {
+                            position: word_id
+                            for word_id, position in word_positions.items()
+                        }
+                        head_positions = greedy_decode(
+                            arc_scores[row], word_positions
+                        )
+                        word_heads = {
+                            word_id: (
+                                0
+                                if head == 0
+                                else inverse_positions[head] + 1
+                            )
+                            for word_id, head in head_positions.items()
+                        }
                         dep_positions = list(word_positions.values())
-                        heads = [head_positions[wid] for wid in word_positions]
-                        # Treat selected arcs as length-one sequences, not an N x N grid.
+                        heads = [
+                            head_positions[word_id]
+                            for word_id in word_positions
+                        ]
                         rel_scores = self.rel_biaffine(
                             rel_dep[row, dep_positions].unsqueeze(1),
                             rel_head[row, heads].unsqueeze(1),
                         )
                         rel_ids = rel_scores[:, 0, 0].argmax(-1).cpu().tolist()
                         word_deprels = {
-                            wid: inv_deprel.get(rel_id, "_")
-                            for wid, rel_id in zip(word_positions, rel_ids)
+                            word_id: inv_deprel.get(rel_id, "_")
+                            for word_id, rel_id in zip(word_positions, rel_ids)
                         }
-
-                    sent = sentences[index]
-                    new_sent = Sentence(comments=sent.comments)
-                    for tok in sent.tokens:
-                        if tok.is_multiword() or tok.is_empty():
-                            new_sent.tokens.append(tok)
-                            continue
-                        new_sent.tokens.append(
-                            replace(
-                                tok,
-                                head=word_heads.get(tok.id - 1, 0),
-                                deprel=word_deprels.get(tok.id - 1, "_"),
+                        new_sent = Sentence(comments=sent.comments)
+                        for tok in sent.tokens:
+                            if tok.is_multiword() or tok.is_empty():
+                                new_sent.tokens.append(tok)
+                                continue
+                            word_id = tok.id - 1
+                            new_sent.tokens.append(
+                                replace(
+                                    tok,
+                                    head=word_heads.get(word_id, 0),
+                                    deprel=word_deprels.get(word_id, "_"),
+                                )
                             )
-                        )
-                    results[index] = new_sent
+                        results[index] = new_sent
+
+        for index, sent in enumerate(sentences):
+            words = words_by_sentence[index]
+            if not words or not root_states[index]:
+                continue
+            missing = [
+                word_id
+                for word_id, state in enumerate(word_states[index])
+                if state is None
+            ]
+            if missing:
+                raise RuntimeError(
+                    f"Parser inference omitted words in sentence {index}: "
+                    f"{[word_id + 1 for word_id in missing]}"
+                )
+
+            root_state = torch.stack(root_states[index]).float().mean(0).to(
+                word_states[index][0].dtype
+            )
+            token_states = [
+                state for state in word_states[index] if state is not None
+            ]
+            sequence_states = torch.stack([root_state] + token_states).to(device)
+            word_positions = {
+                word_id: word_id + 1
+                for word_id in range(len(words))
+            }
+
+            with torch.inference_mode(), self.config.autocast_context(device):
+                arc_scores = self.arc_biaffine(
+                    self.arc_dep_mlp(sequence_states).unsqueeze(0),
+                    self.arc_head_mlp(sequence_states).unsqueeze(0),
+                )[0]
+                head_positions = greedy_decode(arc_scores, word_positions)
+                root_count = sum(head == 0 for head in head_positions.values())
+                if root_count != 1:
+                    raise RuntimeError(
+                        f"Parser produced {root_count} roots in sentence {index}"
+                    )
+
+                dep_positions = list(word_positions.values())
+                heads = [head_positions[word_id] for word_id in word_positions]
+                rel_scores = self.rel_biaffine(
+                    self.rel_dep_mlp(sequence_states)[dep_positions].unsqueeze(1),
+                    self.rel_head_mlp(sequence_states)[heads].unsqueeze(1),
+                )
+                rel_ids = rel_scores[:, 0, 0].argmax(-1).cpu().tolist()
+
+            word_deprels = {
+                word_id: inv_deprel.get(rel_id, "_")
+                for word_id, rel_id in zip(word_positions, rel_ids)
+            }
+            new_sent = Sentence(comments=sent.comments)
+            for tok in sent.tokens:
+                if tok.is_multiword() or tok.is_empty():
+                    new_sent.tokens.append(tok)
+                    continue
+                word_id = tok.id - 1
+                if word_id not in head_positions:
+                    raise RuntimeError(
+                        f"Parser inference omitted word {tok.id} in sentence {index}"
+                    )
+                head_position = head_positions[word_id]
+                new_sent.tokens.append(
+                    replace(
+                        tok,
+                        head=0 if head_position == 0 else head_position,
+                        deprel=word_deprels[word_id],
+                    )
+                )
+            results[index] = new_sent
 
         return results

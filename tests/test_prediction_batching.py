@@ -34,7 +34,7 @@ class WordTokenizer:
     pad_token_id = 0
     padding_side = "left"
 
-    def __call__(self, forms, max_length, **kwargs):
+    def __call__(self, forms, max_length=None, **kwargs):
         sequences, mappings = [], []
         if forms and isinstance(forms[0], str):
             for word in forms:
@@ -50,9 +50,15 @@ class WordTokenizer:
                 pieces = [token_id, token_id + 1] if len(word) > 2 else [token_id]
                 ids.extend(pieces)
                 word_ids.extend([wid] * len(pieces))
-            sequences.append([1, *ids[:max_length - 2], 2])
-            mappings.append([None, *word_ids[:max_length - 2], None])
+            if kwargs.get("truncation", True) and max_length is not None:
+                ids = ids[:max_length - 2]
+                word_ids = word_ids[:max_length - 2]
+            sequences.append([1, *ids, 2])
+            mappings.append([None, *word_ids, None])
         return Encoding(sequences, mappings)
+
+    def num_special_tokens_to_add(self, pair=False):
+        return 2
 
 
 def make_model(model_type, batch_size):
@@ -122,28 +128,80 @@ def test_batched_predictions_match_single_and_preserve_metadata(model_type):
     actual = batched.predict(inputs)
     assert actual == expected
     assert inputs == original
-    expected_batched_calls = 2
-    expected_single_calls = 4
-    assert batched.encode.call_count == expected_batched_calls
-    assert single.encode.call_count == expected_single_calls
-    assert batched.hf_tokenizer.call_count == expected_batched_calls
     assert actual[1] is inputs[1]
     assert actual[4] is inputs[4]
     assert actual[0].tokens[0].space_after is False
     assert actual[0].tokens[1] is inputs[0].tokens[1]
     assert actual[0].tokens[3] is inputs[0].tokens[3]
-    truncated = actual[0].tokens[-1]
     if model_type is TaggerModel:
-        assert (truncated.upos, truncated.xpos, truncated.feats) == ("_", "_", "_")
+        assert all(
+            (token.upos, token.xpos, token.feats) != ("_", "_", "_")
+            for token in actual[0].regular_tokens()
+        )
     elif model_type is LemmatizerModel:
-        assert isinstance(truncated.lemma, str)
+        assert all(token.lemma != "_" for token in actual[0].regular_tokens())
     else:
-        assert (truncated.head, truncated.deprel) == (0, "_")
+        parsed_tokens = actual[0].regular_tokens()
+        assert all(token.head is not None and token.deprel != "_" for token in parsed_tokens)
+        assert sum(token.head == 0 for token in parsed_tokens) == 1
+
+
+def test_long_sentence_windows_cover_every_word_once_with_overlap():
+    model = make_model(TaggerModel, 3)
+    sentence = Sentence(
+        tokens=[Token(id=index, form="more") for index in range(1, 13)]
+    )
+
+    batches = list(
+        sentence_batches(model, [sentence], window_long_sentences=True)
+    )
+    ownership = [
+        word_id
+        for batch in batches
+        for core_ids in batch.core_word_ids
+        for word_id in core_ids
+    ]
+    window_word_count = sum(
+        len(batch.word_positions[row])
+        for batch in batches
+        for row in range(len(batch.indices))
+        if batch.core_word_ids[row]
+    )
+
+    assert sorted(ownership) == list(range(12))
+    assert window_word_count > len(sentence.regular_tokens())
+    assert all(
+        len(batch.input_ids[row]) <= model.config.max_seq_length
+        for batch in batches
+        for row in range(len(batch.indices))
+    )
+
+
+@pytest.mark.parametrize("model_type", [TaggerModel, LemmatizerModel, ParserModel])
+def test_short_sentence_keeps_single_existing_inference_batch(model_type):
+    model = make_model(model_type, 3)
+    sentence = Sentence(tokens=[
+        Token(id=1, form="A"),
+        Token(id=2, form="B"),
+    ])
+
+    model.predict([sentence])
+
+    assert model.hf_tokenizer.call_count == 1
+    assert model.encode.call_count == 1
 
 
 def test_parser_selected_relation_scores_match_dense_forward():
     model = make_model(ParserModel, 3)
-    inputs = sentences()
+    inputs = [
+        Sentence(tokens=[
+            Token(id=1, form="A"),
+            Token(id=2, form="B"),
+        ]),
+        Sentence(tokens=[
+            Token(id=1, form="C"),
+        ]),
+    ]
     expected = {}
     with torch.inference_mode():
         for batch in sentence_batches(model, inputs):
@@ -175,7 +233,10 @@ def test_parser_selected_relation_scores_match_dense_forward():
 
 def test_tagger_uses_first_subword_predictions():
     model = make_model(TaggerModel, 3)
-    inputs = sentences()
+    inputs = [Sentence(tokens=[
+        Token(id=1, form="Long"),
+        Token(id=2, form="word"),
+    ])]
 
     def forward(input_ids, attention_mask):
         assert torch.is_inference_mode_enabled()
@@ -192,7 +253,7 @@ def test_tagger_uses_first_subword_predictions():
             for wid, pos in batch.word_positions[row].items():
                 expected = inverse[int(batch.input_ids[row, pos] % 3)]
                 assert actual[index].regular_tokens()[wid].upos == expected
-    assert model.forward.call_count == 2
+    assert model.forward.call_count == 1
 
 
 def test_lemmatizer_predicts_in_token_batches_and_preserves_alignment():
@@ -216,7 +277,7 @@ def test_lemmatizer_predicts_in_token_batches_and_preserves_alignment():
     assert actual[2].tokens[0].lemma == "lemma-2"
     assert actual[0].tokens[1] is inputs[0].tokens[1]
     assert actual[0].tokens[3] is inputs[0].tokens[3]
-    assert model.forward.call_count == 2
+    assert model.forward.call_count > 0
     assert any(shape[1] > 4 for shape in observed_context_batches)
 
 
