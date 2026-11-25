@@ -15,20 +15,6 @@ Install the package and its runtime dependencies:
 python -m pip install borg_nlp
 ```
 
-### Local models
-
-Load component folders from a local directory:
-
-```python
-from borg import nlp
-
-pipeline = nlp("en", model_path="/path/to/models/en")
-sentences = pipeline("The cat sat on the mat.")
-```
-
-The model directory contains one folder per component. Without `model_path`,
-`nlp("en")` looks under `~/.borg_cube/en/`.
-
 ### Download adapters directly with `borg.nlp`
 
 The standard `borg.nlp` API can download your component repos directly. The
@@ -48,6 +34,20 @@ For a different base ID, pass it explicitly, for example
 `nlp("owner/project", adapter_variant="combined")`. The Hugging Face Hub caches
 downloaded adapters locally. This API does not require a separate pipeline repo
 or `trust_remote_code`.
+
+### Local models
+
+Load component folders from a local directory:
+
+```python
+from borg import nlp
+
+pipeline = nlp("en", model_path="/path/to/models/en")
+sentences = pipeline("The cat sat on the mat.")
+```
+
+The model directory contains one folder per component. Without `model_path`,
+`nlp("en")` looks under `~/.borg_cube/en/`.
 
 ### Hugging Face models
 
