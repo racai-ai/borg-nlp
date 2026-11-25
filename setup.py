@@ -5,7 +5,7 @@ with open("requirements.txt") as f:
 
 setup(
     name="borg-nlp",
-    version="0.1.1",
+    version="0.1.2",
     description="A complete NLP processing pipeline using DeBERTa-v3 and adapters",
     packages=find_packages(include=["borg", "src", "src.*", "eval"]),
     package_data={"src.pipeline.hf": ["config.json"]},
