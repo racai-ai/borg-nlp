@@ -160,7 +160,7 @@ def _batch_from_encoding(
         core_word_ids.append(core)
 
     input_char_ids = None
-    if model.component in ("lemmatizer", "mwt"):
+    if model.component == "mwt":
         vocab = model.input_vocab
         pad_id = vocab["<PAD>"]
         char_sequences = []

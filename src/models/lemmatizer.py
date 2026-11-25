@@ -30,6 +30,7 @@ from src.models.checkpoints import TrainingState
 
 MAX_WORD_CHARS = 50
 MAX_TRAINING_WORDS = 128
+MAX_INFERENCE_WORD_BATCH = 32
 
 
 def _prepare_training_sentences(sentences: List[Sentence]) -> List[Sentence]:
@@ -448,6 +449,84 @@ class LemmatizerModel(BorgBaseModel):
         return model
 
     # ------------------------------------------------------------------
+    def _predict_word_batch(
+        self,
+        hidden_states: torch.Tensor,
+        upos_ids: torch.Tensor,
+        input_char_ids: torch.Tensor,
+    ) -> List[str]:
+        word_count = hidden_states.shape[0]
+        if word_count > MAX_INFERENCE_WORD_BATCH:
+            raise ValueError(
+                f"Lemmatizer word batches are limited to "
+                f"{MAX_INFERENCE_WORD_BATCH}"
+            )
+
+        upos_emb = self.upos_embedding(upos_ids)
+        input_char_emb = self.input_embedding(input_char_ids)
+        repeated_hidden = torch.cat(
+            [hidden_states, upos_emb], dim=-1
+        ).unsqueeze(1).expand(-1, input_char_emb.shape[1], -1)
+        input_embedding = torch.cat(
+            [repeated_hidden, input_char_emb], dim=-1
+        )
+        with torch.autocast(
+            device_type=input_embedding.device.type,
+            enabled=False,
+        ):
+            encoder_states, _ = self.input_encoder(input_embedding.float())
+
+        output_strings = [""] * word_count
+        finished = [False] * word_count
+        inverse_output_vocab = {
+            value: key for key, value in self.output_vocab.items()
+        }
+        last_output_embeddings = torch.zeros(
+            (
+                word_count,
+                1,
+                input_char_emb.shape[2] + encoder_states.shape[2],
+            ),
+            device=encoder_states.device,
+        )
+        decoder_hidden = None
+
+        for _ in range(200):
+            with torch.autocast(
+                device_type=last_output_embeddings.device.type,
+                enabled=False,
+            ):
+                decoder_output, decoder_hidden = self.output_decoder(
+                    last_output_embeddings.float(),
+                    decoder_hidden,
+                )
+            logits = self.output_logit(decoder_output)
+            output_char_ids = logits.argmax(-1)
+            output_char_emb = self.output_embedding(output_char_ids)
+            for index, char_id in enumerate(output_char_ids[:, 0].tolist()):
+                if char_id == self.output_vocab["<EOS>"]:
+                    finished[index] = True
+                elif not finished[index] and char_id not in (
+                    self.output_vocab["<PAD>"],
+                    self.output_vocab["<SOS>"],
+                ):
+                    output_strings[index] += inverse_output_vocab.get(
+                        char_id, ""
+                    )
+            if all(finished):
+                break
+
+            attention_output, _ = self.attention(
+                query=decoder_output,
+                key=encoder_states,
+                value=encoder_states,
+            )
+            last_output_embeddings = torch.cat(
+                [output_char_emb, attention_output], dim=-1
+            )
+
+        return output_strings
+
     def predict(
         self,
         sentences: List[Sentence],
@@ -455,9 +534,7 @@ class LemmatizerModel(BorgBaseModel):
         show_progress: bool = True,
     ) -> List[Sentence]:
 
-
         device = self.config.resolve_device()
-        device_type = torch.device(device).type
 
         self.eval()
         self.to(device)
@@ -465,41 +542,69 @@ class LemmatizerModel(BorgBaseModel):
         word_lemmas_by_sentence: List[Dict[int, str]] = [
             {} for _ in sentences
         ]
+        word_batch_size = min(
+            MAX_INFERENCE_WORD_BATCH,
+            self.config.eval_batch_size,
+        )
         for batch in sentence_batches(
             self,
             runtime_sentences,
             show_progress=show_progress,
             window_long_sentences=True,
         ):
-            if batch.input_char_ids is None:
-                raise RuntimeError("Lemmatizer inference requires input character IDs")
-            upos_ids = torch.zeros_like(batch.input_ids)
-            for row, word_ids in enumerate(batch.word_ids):
-                token_upos = [
-                    self.upos_vocab.get(token.upos, self.upos_vocab["<UNK>"])
-                    for token in batch.tokens[row]
-                ]
-                upos_ids[row, :len(word_ids)] = torch.tensor(
-                    [token_upos[wid] if wid is not None else 0 for wid in word_ids],
-                    dtype=torch.long,
-                )
-
             with torch.inference_mode(), self.config.autocast_context(device):
-                lemmas = self(
+                hidden = self.encode(
                     batch.input_ids.to(device),
                     batch.attention_mask.to(device),
-                    upos_ids.to(device),
-                    batch.input_char_ids.to(device),
-                )["strings"]
-
-            for row, index in enumerate(batch.indices):
-                sequence_width = batch.input_ids.shape[1] - 2
-                for word_id, position in batch.word_positions[row].items():
-                    if word_id not in batch.core_word_ids[row]:
+                )
+                word_items = []
+                for row, index in enumerate(batch.indices):
+                    if not batch.core_word_ids[row]:
                         continue
-                    word_lemmas_by_sentence[index][word_id] = (
-                        lemmas[row * sequence_width + position - 1]
+                    sentence_tokens = runtime_sentences[index].regular_tokens()
+                    for word_id in batch.core_word_ids[row]:
+                        position = batch.word_positions[row][word_id]
+                        token = sentence_tokens[word_id]
+                        char_ids = [
+                            self.input_vocab["<SOS>"],
+                            *(
+                                self.input_vocab.get(char, self.input_vocab["<UNK>"])
+                                for char in token.form
+                            ),
+                            self.input_vocab["<EOS>"],
+                        ]
+                        upos_id = self.upos_vocab.get(
+                            token.upos, self.upos_vocab["<UNK>"]
+                        )
+                        word_items.append(
+                            (index, word_id, hidden[row, position], upos_id, char_ids)
+                        )
+
+                for start in range(0, len(word_items), word_batch_size):
+                    word_batch = word_items[start:start + word_batch_size]
+                    word_hidden = torch.stack(
+                        [item[2] for item in word_batch]
                     )
+                    word_upos_ids = torch.tensor(
+                        [item[3] for item in word_batch],
+                        dtype=torch.long,
+                        device=device,
+                    )
+                    word_char_ids = pad_sequence(
+                        [
+                            torch.tensor(item[4], dtype=torch.long)
+                            for item in word_batch
+                        ],
+                        batch_first=True,
+                        padding_value=self.input_vocab["<PAD>"],
+                    ).to(device)
+                    lemmas = self._predict_word_batch(
+                        word_hidden,
+                        word_upos_ids,
+                        word_char_ids,
+                    )
+                    for item, lemma in zip(word_batch, lemmas):
+                        word_lemmas_by_sentence[item[0]][item[1]] = lemma
 
         results = list(sentences)
         for index, sent in enumerate(sentences):

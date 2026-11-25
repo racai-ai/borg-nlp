@@ -261,24 +261,42 @@ def test_lemmatizer_predicts_in_token_batches_and_preserves_alignment():
     inputs = sentences()
     observed_context_batches = []
 
-    def forward(input_ids, attention_mask, upos_ids, input_char_ids):
-        assert torch.is_inference_mode_enabled()
-        assert input_ids.shape[0] <= 3
-        assert upos_ids.shape == input_ids.shape
-        assert input_char_ids.shape[0] == input_ids.shape[0]
-        assert torch.all(upos_ids[input_ids <= 2] == 0)
-        observed_context_batches.append(input_ids.shape)
-        return {"strings": [f"lemma-{upos}" for upos in upos_ids[:, 1:-1].reshape(-1).tolist()]}
+    def predict_word_batch(hidden_states, upos_ids, input_char_ids):
+        assert hidden_states.shape[0] <= 32
+        assert input_char_ids.shape[0] == hidden_states.shape[0]
+        observed_context_batches.append(hidden_states.shape)
+        return [f"lemma-{upos}" for upos in upos_ids.tolist()]
 
-    model.forward = Mock(side_effect=forward)
+    model._predict_word_batch = Mock(side_effect=predict_word_batch)
     actual = model.predict(inputs)
     assert actual[0].tokens[0].lemma == "lemma-2"
     assert actual[0].tokens[2].lemma == "lemma-1"
     assert actual[2].tokens[0].lemma == "lemma-2"
     assert actual[0].tokens[1] is inputs[0].tokens[1]
     assert actual[0].tokens[3] is inputs[0].tokens[3]
-    assert model.forward.call_count > 0
-    assert any(shape[1] > 4 for shape in observed_context_batches)
+    assert model._predict_word_batch.call_count > 0
+    assert all(shape[0] <= 32 for shape in observed_context_batches)
+
+
+def test_lemmatizer_batches_words_in_groups_of_at_most_32():
+    model = make_model(LemmatizerModel, 64)
+    sentence = Sentence(
+        tokens=[Token(id=index, form="more", upos="NOUN") for index in range(1, 41)]
+    )
+    observed_batch_sizes = []
+
+    def predict_word_batch(hidden_states, upos_ids, input_char_ids):
+        observed_batch_sizes.append(hidden_states.shape[0])
+        assert input_char_ids.shape[0] == hidden_states.shape[0]
+        return ["lemma"] * hidden_states.shape[0]
+
+    model._predict_word_batch = Mock(side_effect=predict_word_batch)
+    actual = model.predict([sentence])
+
+    assert sum(observed_batch_sizes) == 40
+    assert max(observed_batch_sizes) <= 32
+    assert all(token.lemma == "lemma" for token in actual[0].regular_tokens())
+    assert model.encode.call_count > 1
 
 
 def test_lemmatizer_truncates_long_runtime_forms_and_restores_originals():
@@ -290,12 +308,11 @@ def test_lemmatizer_truncates_long_runtime_forms_and_restores_originals():
     ])]
     original = deepcopy(inputs)
 
-    def forward(input_ids, attention_mask, upos_ids, input_char_ids):
+    def predict_word_batch(hidden_states, upos_ids, input_char_ids):
         assert input_char_ids.shape[-1] <= 52
-        sequence_width = input_ids.shape[1] - 2
-        return {"strings": ["predicted"] * (input_ids.shape[0] * sequence_width)}
+        return ["predicted"] * hidden_states.shape[0]
 
-    model.forward = Mock(side_effect=forward)
+    model._predict_word_batch = Mock(side_effect=predict_word_batch)
     actual = model.predict(inputs)
 
     assert actual[0].tokens[0].lemma == "predicted"
