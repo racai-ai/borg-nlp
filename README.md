@@ -1,8 +1,8 @@
-# borg-cube
+# borg_nlp
 
 ## 1. Introduction
 
-`borg-cube` is a Python NLP pipeline for tokenization, multiword-token
+`borg_nlp` is a Python NLP pipeline for tokenization, multiword-token
 expansion, part-of-speech tagging, dependency parsing, and lemmatization.
 Components can be used from a local model directory or loaded as a
 Hugging Face pipeline.
@@ -12,7 +12,7 @@ Hugging Face pipeline.
 Install the package and its runtime dependencies:
 
 ```sh
-python -m pip install borg-nlp
+python -m pip install borg_nlp
 ```
 
 ### Local models
@@ -20,33 +20,32 @@ python -m pip install borg-nlp
 Load component folders from a local directory:
 
 ```python
-from borg import cube
+from borg import nlp
 
-nlp = cube("en", model_path="/path/to/models/en")
-sentences = nlp("The cat sat on the mat.")
+pipeline = nlp("en", model_path="/path/to/models/en")
+sentences = pipeline("The cat sat on the mat.")
 ```
 
 The model directory contains one folder per component. Without `model_path`,
-`cube("en")` looks under `~/.borg_cube/en/`.
+`nlp("en")` looks under `~/.borg_cube/en/`.
 
-### Download adapters directly with `borg.cube`
+### Download adapters directly with `borg.nlp`
 
-The standard `borg.cube` API can download your component repos directly. The
+The standard `borg.nlp` API can download your component repos directly. The
 default base ID is `racai/borg`; it is only a naming prefix and does not need
 to be an existing Hub repo. No argument selects the default adapters, while
 `"combined"` selects the combined variant:
 
 ```python
-from borg import cube
+from borg import nlp
 
-nlp = cube()
-# #or 
-#nlp = cube(model="racai/borg")
-sentences = nlp("The cat sat on the mat.")
+pipeline = nlp()
+# or: pipeline = nlp(model="racai/borg")
+sentences = pipeline("The cat sat on the mat.")
 ```
 
 For a different base ID, pass it explicitly, for example
-`cube("owner/project", adapter_variant="combined")`. The Hugging Face Hub caches
+`nlp("owner/project", adapter_variant="combined")`. The Hugging Face Hub caches
 downloaded adapters locally. This API does not require a separate pipeline repo
 or `trust_remote_code`.
 
@@ -76,7 +75,7 @@ nlp = pipeline(
 result = nlp("The cat sat on the mat.")
 ```
 
-Install `borg-nlp` in the inference environment before loading the pipeline.
+Install `borg_nlp` in the inference environment before loading the pipeline.
 `trust_remote_code=True` runs code from the Hub repository; review it before
 enabling this option. Runtime device selection uses the local hardware by
 default; pass `device=-1` to force CPU.
@@ -93,7 +92,7 @@ pass `show_progress=False` to disable them.
 Install the latest source directly:
 
 ```sh
-python -m pip install "git+https://github.com/tiberiu44/borg-cube.git"
+python -m pip install "git+https://github.com/tiberiu44/borg-cube.git#egg=borg_nlp"
 ```
 
 For development, clone the repository and install it in editable mode:
@@ -136,7 +135,7 @@ borg upload data/models/mixed/parser/ racai/borg-parser-combined
 borg upload data/models/mixed/lemmatizer/ racai/borg-lemmatizer-combined
 ```
 
-These component repos are sufficient for `borg.cube`; a separate base pipeline
+These component repos are sufficient for `borg.nlp`; a separate base pipeline
 repo is needed only for Transformers `pipeline()`:
 
 ```sh

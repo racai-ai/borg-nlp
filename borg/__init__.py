@@ -1,10 +1,10 @@
-"""Public Python API for borg-cube.
+"""Public Python API for borg_nlp.
 
 Usage::
 
-    from borg import cube
-    nlp = cube('en')
-    sentences = nlp("The cat sat on the mat.")
+    from borg import nlp
+    pipeline = nlp('en')
+    sentences = pipeline("The cat sat on the mat.")
     print(sentences)
 """
 from __future__ import annotations
@@ -20,8 +20,8 @@ from src.pipeline.pipeline import BorgPipeline
 DEFAULT_HUB_BASE_ID = "racai/borg"
 
 
-class Cube:
-    """High-level interface to the borg-cube NLP pipeline.
+class Nlp:
+    """High-level interface to the borg_nlp pipeline.
 
     Parameters
     ----------
@@ -80,23 +80,23 @@ class Cube:
             c for c in self.DEFAULT_COMPONENTS
             if getattr(self.pipeline, f"{c}_model") is not None
         ]
-        return f"Cube(lang={self.lang!r}, loaded={loaded})"
+        return f"Nlp(lang={self.lang!r}, loaded={loaded})"
 
 
-def cube(
+def nlp(
     model: Optional[str] = None,
     components: Optional[List[str]] = None,
     config: Optional[BorgConfig] = None,
     *,
     adapter_variant: Optional[str] = None,
     checkpoint: str = "best",
-) -> Cube:
+) -> Nlp:
     """Load a local model or download component adapters from the Hub.
 
-    ``cube()`` downloads default adapters using ``racai/borg`` as their name
-    prefix. ``cube("combined")`` downloads the ``-combined`` variant.
-    ``cube("en")`` loads local components from ``~/.borg_cube/en/``.
-    ``cube("file:///path/to/models")`` loads from a local folder.
+    ``nlp()`` downloads default adapters using ``racai/borg`` as their name
+    prefix. ``nlp("combined")`` downloads the ``-combined`` variant.
+    ``nlp("en")`` loads local components from ``~/.borg_cube/en/``.
+    ``nlp("file:///path/to/models")`` loads from a local folder.
     An explicit Hub base ID such as ``"owner/project"`` downloads component
     repos named ``owner/project-<component>``. No base pipeline repo is needed.
     """
@@ -105,7 +105,7 @@ def cube(
         if not model_path:
             raise ValueError("A file:// model URI must include a folder path")
         lang = os.path.basename(os.path.normpath(model_path)) or "en"
-        return Cube(lang=lang, model_path=model_path, components=components, config=config)
+        return Nlp(lang=lang, model_path=model_path, components=components, config=config)
 
     if model == "combined":
         if adapter_variant is not None:
@@ -119,20 +119,20 @@ def cube(
     elif model.count("/") == 1 and not model.startswith((".", "/")):
         base_repo_id = model
     else:
-        return Cube(lang=model, components=components, config=config)
+        return Nlp(lang=model, components=components, config=config)
 
     selected_components = (
-        Cube.DEFAULT_COMPONENTS if components is None else components
+        Nlp.DEFAULT_COMPONENTS if components is None else components
     )
     if not selected_components:
-        return Cube(
+        return Nlp(
             lang=config.lang if config is not None else "en",
             components=[],
             config=config,
             _component_paths={},
         )
 
-    unknown = set(selected_components) - set(Cube.DEFAULT_COMPONENTS)
+    unknown = set(selected_components) - set(Nlp.DEFAULT_COMPONENTS)
     if unknown:
         raise ValueError(f"Unknown components: {', '.join(sorted(unknown))}")
 
@@ -154,7 +154,7 @@ def cube(
             config = BorgConfig.from_dict(json.load(source))
         config.device = "auto"
 
-    return Cube(
+    return Nlp(
         lang=config.lang,
         components=selected_components,
         config=config,

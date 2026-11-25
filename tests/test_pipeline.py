@@ -459,59 +459,60 @@ class TestEvaluation(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 6. Cube class (mocked — no model loading)
+# 6. Nlp class (mocked — no model loading)
 # ---------------------------------------------------------------------------
 
-class TestCubeAPI(unittest.TestCase):
+class TestNlpAPI(unittest.TestCase):
 
-    def test_cube_init_no_models(self):
-        """Cube should initialize without errors even if no models exist."""
-        from borg import Cube
+    def test_nlp_init_no_models(self):
+        """Nlp should initialize without errors even if no models exist."""
+        from borg import Nlp
         # Point to a non-existent dir so no models are loaded
-        cube = Cube(lang="en", model_path="/tmp/__nonexistent_borg_cube__")
-        self.assertIsNotNone(cube.pipeline)
+        pipeline = Nlp(lang="en", model_path="/tmp/__nonexistent_borg_nlp__")
+        self.assertIsNotNone(pipeline.pipeline)
 
-    def test_cube_call_returns_list(self):
-        """Cube.__call__ should return a list even without models."""
-        from borg import Cube
-        cube = Cube(lang="en", model_path="/tmp/__nonexistent_borg_cube__")
-        result = cube("Hello world")
+    def test_nlp_call_returns_list(self):
+        """Nlp.__call__ should return a list even without models."""
+        from borg import Nlp
+        pipeline = Nlp(lang="en", model_path="/tmp/__nonexistent_borg_nlp__")
+        result = pipeline("Hello world")
         self.assertIsInstance(result, list)
 
-    def test_cube_repr(self):
-        from borg import Cube
-        cube = Cube(lang="de", model_path="/tmp/__nonexistent_borg_cube__")
-        r = repr(cube)
+    def test_nlp_repr(self):
+        from borg import Nlp
+        pipeline = Nlp(lang="de", model_path="/tmp/__nonexistent_borg_nlp__")
+        r = repr(pipeline)
         self.assertIn("de", r)
+        self.assertIn("Nlp", r)
 
-    def test_cube_factory_loads_named_model_components(self):
-        from borg import cube
+    def test_nlp_factory_loads_named_model_components(self):
+        from borg import nlp
 
         with tempfile.TemporaryDirectory() as home:
             component_dir = os.path.join(home, ".borg_cube", "ro_rrt", "tagger")
             os.makedirs(component_dir)
             with patch("borg.os.path.expanduser", return_value=home):
                 with patch("borg.BorgPipeline.load_component") as load_component:
-                    api = cube("ro_rrt", components=["tagger"])
+                    api = nlp("ro_rrt", components=["tagger"])
 
         self.assertIsNotNone(api.pipeline)
         load_component.assert_called_once_with("tagger", component_dir)
 
-    def test_cube_factory_loads_file_uri_and_empty_components(self):
-        from borg import cube
+    def test_nlp_factory_loads_file_uri_and_empty_components(self):
+        from borg import nlp
 
         with tempfile.TemporaryDirectory() as model_path:
             os.makedirs(os.path.join(model_path, "tokenizer"))
             with patch("borg.BorgPipeline.load_component") as load_component:
-                api = cube("file://" + model_path, components=[])
+                api = nlp("file://" + model_path, components=[])
 
         load_component.assert_not_called()
         self.assertEqual(api.model_path, model_path)
 
-    def test_cube_factory_downloads_hub_adapters_without_base_repo(self):
+    def test_nlp_factory_downloads_hub_adapters_without_base_repo(self):
         import json
 
-        from borg import cube
+        from borg import nlp
 
         repo_ids = []
         with tempfile.TemporaryDirectory() as cache:
@@ -539,7 +540,7 @@ class TestCubeAPI(unittest.TestCase):
                 side_effect=download,
             ):
                 with patch("borg.BorgPipeline.load_component") as load_component:
-                    api = cube(
+                    api = nlp(
                         model="combined",
                         components=["tokenizer", "parser"],
                     )
@@ -564,10 +565,10 @@ class TestCubeAPI(unittest.TestCase):
         self.assertEqual(api.config.device, "auto")
         self.assertIsNone(api.model_path)
 
-    def test_cube_factory_defaults_to_base_hub_adapters(self):
+    def test_nlp_factory_defaults_to_base_hub_adapters(self):
         import json
 
-        from borg import cube
+        from borg import nlp
 
         repo_ids = []
         with tempfile.TemporaryDirectory() as cache:
@@ -585,7 +586,7 @@ class TestCubeAPI(unittest.TestCase):
 
             with patch("src.models.hub.snapshot_download", side_effect=download):
                 with patch("borg.BorgPipeline.load_component"):
-                    cube(components=["tokenizer"])
+                    nlp(components=["tokenizer"])
 
         self.assertEqual(repo_ids, ["racai/borg-tokenizer"])
 
