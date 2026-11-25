@@ -12,7 +12,7 @@ Hugging Face pipeline.
 Install the package and its runtime dependencies:
 
 ```sh
-python -m pip install borg_nlp
+python -m pip install borg-nlp
 ```
 
 ### Download adapters directly with `borg.nlp`
