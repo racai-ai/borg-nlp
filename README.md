@@ -87,10 +87,11 @@ nlp = pipeline(
 result = nlp("The cat sat on the mat.")
 ```
 
-Install `borg_nlp` in the inference environment before loading the pipeline.
-`trust_remote_code=True` runs code from the Hub repository; review it before
-enabling this option. Runtime device selection uses the local hardware by
-default; pass `device=-1` to force CPU.
+Install the dependencies listed in the Hub repository's `requirements.txt`
+before loading the pipeline; its source code is included, so a separate
+`borg_nlp` installation is not required. `trust_remote_code=True` runs code
+from the Hub repository; review it before enabling this option. Runtime device
+selection uses the local hardware by default; pass `device=-1` to force CPU.
 
 Predictions use batches of up to `eval_batch_size` sentences (default: 32).
 Reduce it if inference exceeds available memory. Inputs are truncated at

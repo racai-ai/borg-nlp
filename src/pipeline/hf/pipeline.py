@@ -1,6 +1,7 @@
 """Transformers Pipeline adapter for borg-cube checkpoints."""
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -8,8 +9,6 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from huggingface_hub import snapshot_download
 from transformers.pipelines import Pipeline
-
-from src.models.hub import download_component_checkpoints
 
 _COMPONENTS = ("tokenizer", "mwt", "tagger", "parser", "lemmatizer")
 
@@ -63,7 +62,7 @@ def _discover_checkpoints(
 
 
 def _load_config(path: Path):
-    from src.config import BorgConfig
+    BorgConfig = importlib.import_module("src.config").BorgConfig
 
     with (path / "borg_config.json").open(encoding="utf-8") as source:
         return BorgConfig.from_dict(json.load(source))
@@ -132,8 +131,13 @@ def _load_engine(model, device, adapter_variant: Optional[str] = None):
     if repo_string not in sys.path:
         sys.path.insert(0, repo_string)
 
-    from src.config import BorgConfig
-    from src.pipeline.pipeline import BorgPipeline
+    BorgConfig = importlib.import_module("src.config").BorgConfig
+    BorgPipeline = importlib.import_module(
+        "src.pipeline.pipeline"
+    ).BorgPipeline
+    download_component_checkpoints = importlib.import_module(
+        "src.models.hub"
+    ).download_component_checkpoints
 
     adapter_checkpoints = download_component_checkpoints(
         model.config._name_or_path,

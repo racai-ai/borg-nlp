@@ -93,20 +93,15 @@ def export_hf_repo(
 
     (output_path / "README.md").write_text(
         "# Borg Cube\n\n"
-        "This repository contains the borg-cube pipeline configuration and "
-        "runtime code, but not its component weights. Publish each component "
-        "to a model repository named by appending `-<component>` to this "
-        "repository ID (for example, `racai-ai/mixed-tokenizer`). The pipeline "
-        "downloads the listed components at runtime. Pass `adapter_variant` "
-        "to select repositories with an additional suffix, such as "
-        "`racai/borg-tokenizer-combined`; omit it for default repositories. "
-        "Its custom pipeline code is loaded by Transformers; review it before enabling "
-        "`trust_remote_code`.\n\n"
-        "Install the dependencies listed in `requirements.txt`, then run:\n\n"
+        "This is the pipeline for the BORG Natural Language Processing "
+        "framework. For more support, you can go to the official "
+        "repo(https://github.com/racai-ai/borg-nlp) and/or use the standalone "
+        "PIP package (borg-nlp)\n\n"
+        "**Before proceeding**: You will need the following packages "
+        "installed: `adapters` `torch` `protobuf` `sentencepiece>=0.1.99`\n\n"
         "```python\n"
         "from transformers import pipeline\n\n"
-        'nlp = pipeline(model="your-username/your-nlp-repo", '
-        "trust_remote_code=True, adapter_variant='combined')\n"
+        'nlp = pipeline(model="racai/borg", trust_remote_code=True)\n'
         'result = nlp("Your input text here")\n'
         "```\n",
         encoding="utf-8",

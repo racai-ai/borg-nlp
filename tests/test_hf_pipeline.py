@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 import torch
+from transformers.dynamic_module_utils import get_imports
 
 from src.config import BorgConfig
 from src.data.conllu import Sentence, Token
@@ -22,6 +23,17 @@ from src.pipeline.hf.pipeline import (
 
 
 class TestHuggingFacePipeline(unittest.TestCase):
+    def test_remote_pipeline_does_not_require_src_to_be_installed(self):
+        pipeline_file = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "pipeline"
+            / "hf"
+            / "pipeline.py"
+        )
+
+        self.assertNotIn("src", get_imports(pipeline_file))
+
     def test_marker_model_exposes_a_device_to_transformers(self):
         model = BorgHFModel(BorgHFConfig())
 
